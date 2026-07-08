@@ -32,7 +32,7 @@ export default function ProductCard({ product }) {
   };
 
   return (
-    <Card className="hover:shadow-lg transition-shadow">
+    <Card className="border-border/70 bg-card/90 transition-shadow hover:shadow-lg">
       <CardHeader className="pb-3">
         <div className="flex gap-4">
           {product.image_url && (
@@ -45,12 +45,12 @@ export default function ProductCard({ product }) {
           )}
 
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-gray-900 line-clamp-2 mb-2">
+            <h3 className="mb-2 line-clamp-2 font-semibold text-foreground">
               {product.name}
             </h3>
 
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-orange-500">
+              <span className="text-3xl font-bold text-primary">
                 {product.currency} {product.current_price}
               </span>
               <Badge variant="secondary" className="gap-1">
@@ -95,7 +95,7 @@ export default function ProductCard({ product }) {
             size="sm"
             onClick={handleDelete}
             disabled={deleting}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50 gap-1"
+            className="gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             <Trash2 className="w-4 h-4" />
             Remove

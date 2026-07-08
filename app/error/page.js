@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 export default function ErrorPage({ searchParams }) {
   const errorMessage = searchParams?.error
@@ -6,19 +8,18 @@ export default function ErrorPage({ searchParams }) {
     : "Sorry, there was an error during authentication. Please try again.";
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4">
-      <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-        <h1 className="text-2xl font-bold text-red-600 mb-4">
-          Authentication Error
-        </h1>
-        <p className="text-gray-600 mb-6">{errorMessage}</p>
-        <Link
-          href="/"
-          className="inline-block bg-orange-500 text-white px-6 py-2 rounded-lg hover:bg-orange-600 transition"
-        >
-          Back to Home
-        </Link>
-      </div>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md border-border/70 text-center shadow-lg">
+        <CardContent className="p-8">
+          <h1 className="mb-4 text-2xl font-bold text-destructive">
+            Authentication Error
+          </h1>
+          <p className="mb-6 text-muted-foreground">{errorMessage}</p>
+          <Button asChild>
+            <Link href="/">Back to Home</Link>
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

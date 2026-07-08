@@ -35,7 +35,7 @@ export default function PriceChart({ productId }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-8 text-gray-500 w-full">
+      <div className="flex w-full items-center justify-center py-8 text-muted-foreground">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
         Loading chart...
       </div>
@@ -44,7 +44,7 @@ export default function PriceChart({ productId }) {
 
   if (data.length === 0) {
     return (
-      <div className="text-center py-8 text-gray-500 w-full">
+      <div className="w-full py-8 text-center text-muted-foreground">
         No price history yet. Check back after the first daily update!
       </div>
     );
@@ -52,27 +52,33 @@ export default function PriceChart({ productId }) {
 
   return (
     <div className="w-full">
-      <h4 className="text-sm font-semibold mb-4 text-gray-700">
-        Price History
-      </h4>
+      <h4 className="mb-4 text-sm font-semibold text-foreground">Price History</h4>
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-          <XAxis dataKey="date" tick={{ fontSize: 12 }} stroke="#9ca3af" />
-          <YAxis tick={{ fontSize: 12 }} stroke="#9ca3af" />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+            stroke="var(--muted-foreground)"
+          />
+          <YAxis
+            tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+            stroke="var(--muted-foreground)"
+          />
           <Tooltip
             contentStyle={{
-              backgroundColor: "white",
-              border: "1px solid #e5e7eb",
+              backgroundColor: "var(--popover)",
+              border: "1px solid var(--border)",
               borderRadius: "6px",
+              color: "var(--popover-foreground)",
             }}
           />
           <Line
             type="monotone"
             dataKey="price"
-            stroke="#FA5D19"
+            stroke="var(--primary)"
             strokeWidth={2}
-            dot={{ fill: "#FA5D19", r: 4 }}
+            dot={{ fill: "var(--primary)", r: 4 }}
             activeDot={{ r: 6 }}
           />
         </LineChart>

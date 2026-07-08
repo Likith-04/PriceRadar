@@ -5,7 +5,7 @@ import { addProduct } from "@/app/actions";
 import AuthModal from "./AuthModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2 } from "lucide-react";
+import { ArrowRight, Link2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function AddProductForm({ user }) {
@@ -40,34 +40,48 @@ export default function AddProductForm({ user }) {
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="w-full max-w-2xl mx-auto">
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste product URL (Amazon, Walmart, etc.)"
-            className="h-12 text-base"
-            required
-            disabled={loading}
-          />
+      <form onSubmit={handleSubmit} className="w-full max-w-3xl">
+        <div className="rounded-[1.5rem] border border-border/70 bg-card/80 p-3 shadow-lg backdrop-blur-xl">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="relative flex-1">
+              <Link2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="Paste a product URL to start your watchlist"
+                className="h-14 rounded-xl border-0 bg-background/80 pl-11 text-base shadow-none ring-1 ring-border/70"
+                required
+                disabled={loading}
+              />
+            </div>
 
-          <Button
-            type="submit"
-            disabled={loading}
-            className="bg-orange-500 hover:bg-orange-600 h-10 sm:h-12 px-8"
-            size="lg"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Adding...
-              </>
-            ) : (
-              "Track Price"
-            )}
-          </Button>
+            <Button
+              type="submit"
+              disabled={loading}
+              className="h-14 rounded-xl px-6 shadow-lg shadow-primary/15 sm:px-8"
+              size="lg"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Adding product
+                </>
+              ) : (
+                <>
+                  Start Tracking
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </Button>
+          </div>
         </div>
+
+        <p className="mt-3 px-1 text-sm leading-6 text-muted-foreground">
+          {user
+            ? "We’ll save the latest price now and keep adding history points whenever it changes."
+            : "Sign in with Google after pasting a link to save your watchlist and receive email drop alerts."}
+        </p>
       </form>
 
       <AuthModal
