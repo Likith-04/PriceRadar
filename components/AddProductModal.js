@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { addProduct } from "@/app/actions";
 import {
   Dialog,
@@ -12,15 +12,52 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Link2, Target, Loader2, Sparkles } from "lucide-react";
+import {
+  Link2,
+  Target,
+  Loader2,
+  Sparkles,
+  CheckCircle2,
+  AlertTriangle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import {
+  detectRetailer,
+  getRetailerConfig,
+  SUPPORTED_RETAILERS_SUMMARY,
+} from "@/lib/retailers";
 
 export default function AddProductModal({ isOpen, onClose, onProductAdded }) {
   const [url, setUrl] = useState("");
   const [targetPrice, setTargetPrice] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+
+  // Real-time retailer detection
+  const detectedRetailerInfo = useMemo(() => {
+    if (!url.trim()) return null;
+    const retailerId = detectRetailer(url);
+    if (retailerId) {
+      return {
+        isSupported: true,
+        config: getRetailerConfig(retailerId),
+      };
+    }
+    try {
+      const candidate = url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}`;
+      const parsed = new URL(candidate);
+      if (parsed.hostname && parsed.hostname.includes(".")) {
+        return {
+          isSupported: false,
+          hostname: parsed.hostname.replace(/^www\./i, ""),
+        };
+      }
+    } catch {
+      // In-progress typing
+    }
+    return null;
+  }, [url]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -39,8 +76,11 @@ export default function AddProductModal({ isOpen, onClose, onProductAdded }) {
     if (result?.error) {
       toast.error(result.error);
     } else {
+      const retailerName = result.product?.retailer
+        ? getRetailerConfig(result.product.retailer)?.name || result.product.retailer
+        : "Product";
       toast.success(
-        result?.message || "Product queued! Extracting details in background."
+        result?.message || `${retailerName} product queued! Extracting in background.`
       );
       setUrl("");
       setTargetPrice("");
@@ -62,7 +102,7 @@ export default function AddProductModal({ isOpen, onClose, onProductAdded }) {
               Track a New Product
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Paste any store link. PriceRadar queues a background job to extract current prices, image, and start continuous monitoring.
+              Paste a link from Amazon India, Flipkart, Reliance Digital, or Croma. PriceRadar queues a background job to extract prices and monitor continuously.
             </DialogDescription>
           </DialogHeader>
 
@@ -77,14 +117,36 @@ export default function AddProductModal({ isOpen, onClose, onProductAdded }) {
                 type="url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://www.amazon.com/dp/B08N5WRWNW..."
+                placeholder="https://www.amazon.in/dp/... or flipkart.com/..."
                 required
                 className="h-11 rounded-xl text-sm"
                 disabled={loading}
                 autoFocus
               />
+
+              {/* Retailer Real-Time Status */}
+              {detectedRetailerInfo && (
+                <div className="pt-1">
+                  {detectedRetailerInfo.isSupported ? (
+                    <div className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>
+                        <strong>{detectedRetailerInfo.config?.name}</strong> detected
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>
+                        <strong>{detectedRetailerInfo.hostname}</strong> is unsupported. Supported: {SUPPORTED_RETAILERS_SUMMARY}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <p className="text-[11px] text-muted-foreground">
-                Supports Amazon, Walmart, Zara, Target, BestBuy, and modern e-commerce stores.
+                Supported: Amazon India, Flipkart, Reliance Digital, and Croma.
               </p>
             </div>
 
@@ -92,7 +154,7 @@ export default function AddProductModal({ isOpen, onClose, onProductAdded }) {
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 <Target className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                Target Alert Price (Optional)
+                Target Alert Price in INR (Optional)
               </label>
               <Input
                 type="number"
@@ -100,7 +162,7 @@ export default function AddProductModal({ isOpen, onClose, onProductAdded }) {
                 min="0.01"
                 value={targetPrice}
                 onChange={(e) => setTargetPrice(e.target.value)}
-                placeholder="e.g. 199.99"
+                placeholder="e.g. 49999.00"
                 className="h-11 rounded-xl text-sm"
                 disabled={loading}
               />

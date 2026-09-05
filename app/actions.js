@@ -44,9 +44,12 @@ export async function addProduct(formData) {
     let product = existingProduct;
     let isUpdate = !!existingProduct;
 
+    const retailer = urlValidation.retailer || "amazon";
+
     if (isUpdate) {
       // If product exists, update target_price if provided, set status to PENDING
       const updatePayload = {
+        retailer,
         status: "PENDING",
         error_message: null,
         updated_at: new Date().toISOString(),
@@ -73,9 +76,10 @@ export async function addProduct(formData) {
         .insert({
           user_id: user.id,
           url: normalizedUrl,
+          retailer,
           name: "Fetching product details...",
           current_price: 0,
-          currency: "USD",
+          currency: "INR",
           target_price: targetPrice,
           status: "PENDING",
           created_at: new Date().toISOString(),

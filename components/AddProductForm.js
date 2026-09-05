@@ -1,12 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { addProduct } from "@/app/actions";
 import AuthModal from "./AuthModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowRight, Link2, Loader2, Target } from "lucide-react";
+import {
+  ArrowRight,
+  Link2,
+  Loader2,
+  Target,
+  CheckCircle2,
+  AlertTriangle,
+  Store,
+} from "lucide-react";
 import { toast } from "sonner";
+import {
+  detectRetailer,
+  getRetailerConfig,
+  SUPPORTED_RETAILERS_SUMMARY,
+} from "@/lib/retailers";
 
 export default function AddProductForm({ user }) {
   const [url, setUrl] = useState("");
@@ -14,6 +27,32 @@ export default function AddProductForm({ user }) {
   const [showTargetInput, setShowTargetInput] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // Real-time retailer detection
+  const detectedRetailerInfo = useMemo(() => {
+    if (!url.trim()) return null;
+    const retailerId = detectRetailer(url);
+    if (retailerId) {
+      return {
+        isSupported: true,
+        config: getRetailerConfig(retailerId),
+      };
+    }
+    // Check if it has a valid domain structure but unsupported retailer
+    try {
+      const candidate = url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}`;
+      const parsed = new URL(candidate);
+      if (parsed.hostname && parsed.hostname.includes(".")) {
+        return {
+          isSupported: false,
+          hostname: parsed.hostname.replace(/^www\./i, ""),
+        };
+      }
+    } catch {
+      // Typing in progress
+    }
+    return null;
+  }, [url]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -36,7 +75,12 @@ export default function AddProductForm({ user }) {
     if (result.error) {
       toast.error(result.error);
     } else {
-      toast.success(result.message || "Product queued for tracking!");
+      const retailerName = result.product?.retailer
+        ? getRetailerConfig(result.product.retailer)?.name || result.product.retailer
+        : "Product";
+      toast.success(
+        result.message || `${retailerName} product queued for tracking!`
+      );
       setUrl("");
       setTargetPrice("");
       setShowTargetInput(false);
@@ -56,7 +100,7 @@ export default function AddProductForm({ user }) {
                 type="url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="Paste a product URL to start your watchlist"
+                placeholder="Paste an Amazon, Flipkart, Reliance Digital, or Croma link"
                 className="h-14 rounded-xl border-0 bg-background/80 pl-11 text-base shadow-none ring-1 ring-border/70"
                 required
                 disabled={loading}
@@ -72,7 +116,7 @@ export default function AddProductForm({ user }) {
                   min="0.01"
                   value={targetPrice}
                   onChange={(e) => setTargetPrice(e.target.value)}
-                  placeholder="Target Price"
+                  placeholder="Target (₹)"
                   className="h-14 rounded-xl border-0 bg-background/80 pl-11 text-base shadow-none ring-1 ring-border/70"
                   disabled={loading}
                 />
@@ -99,6 +143,27 @@ export default function AddProductForm({ user }) {
             </Button>
           </div>
 
+          {/* Real-time Retailer Detection Pill */}
+          {detectedRetailerInfo && (
+            <div className="mt-2.5 px-2">
+              {detectedRetailerInfo.isSupported ? (
+                <div className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>
+                    <strong>{detectedRetailerInfo.config?.name}</strong> detected
+                  </span>
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>
+                    <strong>{detectedRetailerInfo.hostname}</strong> is not supported yet. Supported: {SUPPORTED_RETAILERS_SUMMARY}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="mt-2 flex items-center justify-between px-2 text-xs text-muted-foreground">
             <button
               type="button"
@@ -108,13 +173,18 @@ export default function AddProductForm({ user }) {
               <Target className="h-3.5 w-3.5" />
               {showTargetInput ? "Hide target price" : "+ Add optional target alert price"}
             </button>
+
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-muted-foreground/80">
+              <Store className="h-3 w-3" />
+              Supports: {SUPPORTED_RETAILERS_SUMMARY}
+            </span>
           </div>
         </div>
 
         <p className="mt-3 px-1 text-sm leading-6 text-muted-foreground">
           {user
-            ? "We'll queue the product for extraction and continuously record price history snapshots."
-            : "Sign in with Google after pasting a link to save your watchlist and receive email drop alerts."}
+            ? "We'll queue the product for background extraction across Indian retailers and continuously track price changes."
+            : "Sign in with Google to save your multi-retailer watchlist and receive instant email drop alerts."}
         </p>
       </form>
 

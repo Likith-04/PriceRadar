@@ -6,7 +6,6 @@ import PriceChart from "./PriceChart";
 import {
   Card,
   CardContent,
-  CardFooter,
   CardHeader,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,8 +22,6 @@ import {
 import {
   ExternalLink,
   Trash2,
-  TrendingDown,
-  TrendingUp,
   ChevronDown,
   ChevronUp,
   Target,
@@ -35,9 +32,9 @@ import {
   Clock,
   Store,
 } from "lucide-react";
-import Link from "next/link";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { getRetailerConfig, detectRetailer } from "@/lib/retailers";
 
 export default function ProductCard({ product }) {
   const [showChart, setShowChart] = useState(false);
@@ -52,7 +49,11 @@ export default function ProductCard({ product }) {
   const [savingTarget, setSavingTarget] = useState(false);
   const router = useRouter();
 
-  // Extract store domain safely
+  // Retailer metadata
+  const retailerId = product.retailer || detectRetailer(product.url);
+  const retailerConfig = getRetailerConfig(retailerId);
+
+  // Extract store domain safely for fallback
   let domain = "Store";
   try {
     const parsed = new URL(product.url);
@@ -126,6 +127,22 @@ export default function ProductCard({ product }) {
   const targetPrice = hasTarget ? Number(product.target_price) : null;
   const isTargetMet = hasTarget && currentPrice > 0 && currentPrice <= targetPrice;
   const diffToTarget = hasTarget && currentPrice > 0 ? currentPrice - targetPrice : null;
+  const currencyCode = product.currency || retailerConfig?.defaultCurrency || "INR";
+
+  // Format currency
+  const formatAmount = (num) => {
+    if (num === null || num === undefined || isNaN(num)) return "0.00";
+    try {
+      return new Intl.NumberFormat("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(num);
+    } catch {
+      return Number(num).toFixed(2);
+    }
+  };
+
+  const currencySymbol = currencyCode === "INR" ? "₹" : currencyCode === "USD" ? "$" : `${currencyCode} `;
 
   // Format last checked relative time
   const lastCheckedDate = product.updated_at ? new Date(product.updated_at) : new Date(product.created_at);
@@ -163,10 +180,19 @@ export default function ProductCard({ product }) {
             <div className="flex-1 min-w-0">
               {/* Store & Status Row */}
               <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
-                <span className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  <Store className="h-3 w-3" />
-                  {domain}
-                </span>
+                {retailerConfig ? (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-colors ${retailerConfig.badgeColor.bg} ${retailerConfig.badgeColor.text} ${retailerConfig.badgeColor.border}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${retailerConfig.badgeColor.dot}`} />
+                    {retailerConfig.name}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <Store className="h-3 w-3" />
+                    {domain}
+                  </span>
+                )}
 
                 {isPending && (
                   <Badge variant="outline" className="gap-1 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-600 dark:text-amber-400">
@@ -211,7 +237,7 @@ export default function ProductCard({ product }) {
                   </span>
                 ) : (
                   <span className="text-2xl font-bold tracking-tight text-primary">
-                    {product.currency || "USD"} {currentPrice.toFixed(2)}
+                    {currencySymbol}{formatAmount(currentPrice)}
                   </span>
                 )}
 
@@ -228,11 +254,11 @@ export default function ProductCard({ product }) {
                 {hasTarget ? (
                   <div className="flex items-center gap-1.5">
                     <span className="text-muted-foreground font-medium text-[11px]">
-                      Target: <strong className="text-foreground">{product.currency || "USD"} {targetPrice.toFixed(2)}</strong>
+                      Target: <strong className="text-foreground">{currencySymbol}{formatAmount(targetPrice)}</strong>
                     </span>
                     {diffToTarget > 0 && (
                       <span className="text-[10px] text-muted-foreground">
-                        ({product.currency || "USD"} {diffToTarget.toFixed(2)} above goal)
+                        ({currencySymbol}{formatAmount(diffToTarget)} above goal)
                       </span>
                     )}
                     <button
@@ -300,52 +326,55 @@ export default function ProductCard({ product }) {
                 )}
               </Button>
 
-              <Button variant="ghost" size="sm" asChild className="h-7 px-2.5 text-xs gap-1 text-foreground/80">
-                <Link href={product.url} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="h-3 w-3" />
-                  Store
-                </Link>
-              </Button>
+              <a
+                href={product.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-7 items-center justify-center rounded-lg px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                title="Open product on store"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
 
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleDelete}
                 disabled={deleting}
-                className="h-7 w-7 p-0 text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
-                aria-label="Remove product"
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                title="Delete product"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
-        </CardContent>
 
-        {/* Expandable Price History Chart */}
-        {showChart && (
-          <CardFooter className="border-t border-border/60 bg-muted/20 pt-4 pb-4">
-            <PriceChart productId={product.id} targetPrice={product.target_price} currentPrice={currentPrice} />
-          </CardFooter>
-        )}
+          {/* Collapsible Interactive Price Chart */}
+          {showChart && (
+            <div className="mt-3 border-t border-border/70 pt-3">
+              <PriceChart productId={product.id} currentPrice={currentPrice} currency={currencyCode} />
+            </div>
+          )}
+        </CardContent>
       </Card>
 
-      {/* Target Price Dialog */}
+      {/* Target Price Configuration Modal */}
       <Dialog open={showTargetModal} onOpenChange={setShowTargetModal}>
         <DialogContent className="sm:max-w-md rounded-2xl">
           <form onSubmit={handleSaveTarget}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
                 <Target className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                {hasTarget ? "Update Target Price" : "Set Target Alert Price"}
+                Set Alert Threshold ({retailerConfig?.name || "Store"})
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                We will monitor this item in the background and dispatch an instant email alert via Resend when the price drops to or below your target.
+                We will monitor this item continuously and dispatch an instant email alert via Resend when the price drops to or below your target.
               </DialogDescription>
             </DialogHeader>
 
             <div className="py-4 space-y-2">
               <label className="text-xs font-semibold text-foreground block">
-                Target Price ({product.currency || "USD"})
+                Target Alert Price in {currencySymbol} ({currencyCode})
               </label>
               <Input
                 type="number"
@@ -353,14 +382,14 @@ export default function ProductCard({ product }) {
                 min="0.01"
                 value={targetInput}
                 onChange={(e) => setTargetInput(e.target.value)}
-                placeholder="e.g. 75.00"
+                placeholder="e.g. 64999.00"
                 required
                 className="h-11 rounded-xl text-base"
                 autoFocus
               />
               {currentPrice > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Current price: <strong>{product.currency || "USD"} {currentPrice.toFixed(2)}</strong>
+                  Current price: <strong>{currencySymbol}{formatAmount(currentPrice)}</strong>
                 </p>
               )}
             </div>

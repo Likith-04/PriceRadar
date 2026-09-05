@@ -98,8 +98,8 @@ export default async function HomePage() {
                       Live Price Signal
                     </span>
                   </div>
-                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                    Amazon • ASIN B08N5WRWNW
+                  <span className="rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 px-2.5 py-0.5 text-[11px] font-semibold">
+                    Amazon India • ASIN B08N5WRWNW
                   </span>
                 </div>
 
@@ -112,12 +112,12 @@ export default async function HomePage() {
                   <div className="flex items-baseline justify-between">
                     <div>
                       <span className="text-xs text-muted-foreground block">Current Price</span>
-                      <span className="text-3xl font-extrabold text-primary">$279.00</span>
+                      <span className="text-3xl font-extrabold text-primary">₹24,990.00</span>
                     </div>
 
                     <div className="text-right">
                       <span className="text-xs text-muted-foreground block">Target Alert Goal</span>
-                      <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400">$280.00</span>
+                      <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400">₹25,000.00</span>
                     </div>
                   </div>
 
@@ -125,7 +125,7 @@ export default async function HomePage() {
                   <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
                     <div className="flex items-center gap-2">
                       <Target className="h-4 w-4" />
-                      <span><strong>Target Condition Met:</strong> Price is $1.00 below your threshold!</span>
+                      <span><strong>Target Condition Met:</strong> Price is ₹10.00 below your threshold!</span>
                     </div>
                     <span className="font-semibold text-[11px]">Email Alert Dispatched</span>
                   </div>

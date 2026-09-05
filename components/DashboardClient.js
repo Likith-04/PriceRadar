@@ -13,22 +13,26 @@ import {
   Activity,
   Clock,
   Target,
-  AlertCircle,
-  Sparkles,
   TrendingDown,
-  RefreshCw,
+  Store,
 } from "lucide-react";
+import {
+  RETAILER_CONFIGS,
+  RETAILER_IDS,
+  detectRetailer,
+} from "@/lib/retailers";
 
 export default function DashboardClient({ products, user }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
+  const [selectedRetailer, setSelectedRetailer] = useState("all");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const router = useRouter();
 
   // Calculate real metrics from PostgreSQL dataset
   const totalCount = products.length;
   const activeCount = products.filter(
-    (p) => p.status === "ACTIVE" || (!p.status && p.current_price > 0)
+    (p) => p.status === "ACTIVE" || (!p.status && Number(p.current_price) > 0)
   ).length;
   const waitingCount = products.filter(
     (p) => p.status === "PENDING" || p.status === "PROCESSING"
@@ -42,6 +46,20 @@ export default function DashboardClient({ products, user }) {
   ).length;
   const failedCount = products.filter((p) => p.status === "FAILED").length;
 
+  // Real retailer breakdown counts
+  const amazonCount = products.filter(
+    (p) => (p.retailer || detectRetailer(p.url)) === RETAILER_IDS.AMAZON
+  ).length;
+  const flipkartCount = products.filter(
+    (p) => (p.retailer || detectRetailer(p.url)) === RETAILER_IDS.FLIPKART
+  ).length;
+  const relianceCount = products.filter(
+    (p) => (p.retailer || detectRetailer(p.url)) === RETAILER_IDS.RELIANCE_DIGITAL
+  ).length;
+  const cromaCount = products.filter(
+    (p) => (p.retailer || detectRetailer(p.url)) === RETAILER_IDS.CROMA
+  ).length;
+
   // Auto-polling for asynchronous background queue jobs
   useEffect(() => {
     if (waitingCount === 0) return;
@@ -53,16 +71,27 @@ export default function DashboardClient({ products, user }) {
     return () => clearInterval(interval);
   }, [waitingCount, router]);
 
-  // Filter products based on search query and active tab
+  // Filter products based on search query, active tab, and selected retailer
   const filteredProducts = products.filter((product) => {
+    const productRetailer = product.retailer || detectRetailer(product.url) || "amazon";
+
+    // Retailer Filter
+    if (selectedRetailer !== "all" && productRetailer !== selectedRetailer) {
+      return false;
+    }
+
+    // Search Query Filter
+    const query = searchQuery.toLowerCase();
     const matchesSearch =
-      (product.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (product.url || "").toLowerCase().includes(searchQuery.toLowerCase());
+      (product.name || "").toLowerCase().includes(query) ||
+      (product.url || "").toLowerCase().includes(query) ||
+      (productRetailer || "").toLowerCase().includes(query);
 
     if (!matchesSearch) return false;
 
+    // Status Tab Filter
     if (activeTab === "active") {
-      return product.status === "ACTIVE" || (!product.status && product.current_price > 0);
+      return product.status === "ACTIVE" || (!product.status && Number(product.current_price) > 0);
     }
     if (activeTab === "waiting") {
       return product.status === "PENDING" || product.status === "PROCESSING";
@@ -90,7 +119,7 @@ export default function DashboardClient({ products, user }) {
             Your Price Radar
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Continuous background price monitoring, target threshold alerts, and history tracking.
+            Multi-retailer price monitoring across Amazon India, Flipkart, Reliance Digital, and Croma.
           </p>
         </div>
 
@@ -111,9 +140,12 @@ export default function DashboardClient({ products, user }) {
         {/* Total Tracked */}
         <button
           type="button"
-          onClick={() => setActiveTab("all")}
+          onClick={() => {
+            setActiveTab("all");
+            setSelectedRetailer("all");
+          }}
           className={`rounded-2xl border p-4 text-left transition-all duration-200 ${
-            activeTab === "all"
+            activeTab === "all" && selectedRetailer === "all"
               ? "border-primary bg-primary/5 shadow-sm"
               : "border-border/70 bg-card/80 hover:border-border"
           }`}
@@ -123,7 +155,7 @@ export default function DashboardClient({ products, user }) {
             <Package className="h-4 w-4 text-primary" />
           </div>
           <p className="mt-3 text-2xl font-bold text-foreground sm:text-3xl">{totalCount}</p>
-          <span className="text-[11px] text-muted-foreground">Items in your watchlist</span>
+          <span className="text-[11px] text-muted-foreground">All supported stores</span>
         </button>
 
         {/* Monitoring / Active */}
@@ -143,7 +175,7 @@ export default function DashboardClient({ products, user }) {
           <p className="mt-3 text-2xl font-bold text-emerald-600 dark:text-emerald-400 sm:text-3xl">
             {activeCount}
           </p>
-          <span className="text-[11px] text-muted-foreground">Active background checks</span>
+          <span className="text-[11px] text-muted-foreground">Active periodic checks</span>
         </button>
 
         {/* Waiting in Queue */}
@@ -177,22 +209,95 @@ export default function DashboardClient({ products, user }) {
           }`}
         >
           <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs font-medium uppercase tracking-wider">Target Reached</span>
+            <span className="text-xs font-medium uppercase tracking-wider">Target Met</span>
             <Target className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
           </div>
           <p className="mt-3 text-2xl font-bold text-emerald-600 dark:text-emerald-400 sm:text-3xl">
             {targetMetCount}
           </p>
-          <span className="text-[11px] text-muted-foreground">Ready to purchase</span>
+          <span className="text-[11px] text-muted-foreground">At or below alert goal</span>
         </button>
       </div>
 
-      {/* Search and Tab Controls */}
+      {/* Retailer Store Filter Bar */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/60 p-3.5 backdrop-blur-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            <Store className="h-3.5 w-3.5 text-primary" />
+            <span>Filter by Store</span>
+          </div>
+          {selectedRetailer !== "all" && (
+            <button
+              onClick={() => setSelectedRetailer("all")}
+              className="text-[11px] text-primary hover:underline font-medium"
+            >
+              Reset Store Filter
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {[
+            { id: "all", label: "All Retailers", count: totalCount, dot: "bg-primary" },
+            {
+              id: RETAILER_IDS.AMAZON,
+              label: RETAILER_CONFIGS[RETAILER_IDS.AMAZON].name,
+              count: amazonCount,
+              dot: RETAILER_CONFIGS[RETAILER_IDS.AMAZON].badgeColor.dot,
+            },
+            {
+              id: RETAILER_IDS.FLIPKART,
+              label: RETAILER_CONFIGS[RETAILER_IDS.FLIPKART].name,
+              count: flipkartCount,
+              dot: RETAILER_CONFIGS[RETAILER_IDS.FLIPKART].badgeColor.dot,
+            },
+            {
+              id: RETAILER_IDS.RELIANCE_DIGITAL,
+              label: RETAILER_CONFIGS[RETAILER_IDS.RELIANCE_DIGITAL].name,
+              count: relianceCount,
+              dot: RETAILER_CONFIGS[RETAILER_IDS.RELIANCE_DIGITAL].badgeColor.dot,
+            },
+            {
+              id: RETAILER_IDS.CROMA,
+              label: RETAILER_CONFIGS[RETAILER_IDS.CROMA].name,
+              count: cromaCount,
+              dot: RETAILER_CONFIGS[RETAILER_IDS.CROMA].badgeColor.dot,
+            },
+          ].map((ret) => {
+            const isSelected = selectedRetailer === ret.id;
+            return (
+              <button
+                key={ret.id}
+                onClick={() => setSelectedRetailer(ret.id)}
+                className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-medium transition-all ${
+                  isSelected
+                    ? "bg-primary text-primary-foreground font-semibold shadow-sm"
+                    : "bg-background/80 text-muted-foreground hover:bg-accent hover:text-foreground border border-border/70"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-primary-foreground" : ret.dot}`} />
+                <span>{ret.label}</span>
+                <span
+                  className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+                    isSelected
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {ret.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Search and Status Tab Controls */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/70 pb-4">
         {/* Status Filter Tabs */}
         <div className="flex flex-wrap items-center gap-1.5">
           {[
-            { id: "all", label: "All Products", count: totalCount },
+            { id: "all", label: "All Items", count: totalCount },
             { id: "active", label: "Monitoring", count: activeCount },
             { id: "waiting", label: "In Queue", count: waitingCount },
             { id: "target_met", label: "Target Met", count: targetMetCount },
@@ -203,7 +308,7 @@ export default function DashboardClient({ products, user }) {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors ${
                 activeTab === tab.id
-                  ? "bg-primary text-primary-foreground font-semibold shadow-sm"
+                  ? "bg-foreground text-background font-semibold shadow-sm"
                   : "bg-card/70 text-muted-foreground hover:bg-accent hover:text-foreground border border-border/60"
               }`}
             >
@@ -211,7 +316,7 @@ export default function DashboardClient({ products, user }) {
               <span
                 className={`rounded-full px-1.5 py-0.2 text-[10px] ${
                   activeTab === tab.id
-                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    ? "bg-background/20 text-background"
                     : "bg-muted text-muted-foreground"
                 }`}
               >
@@ -256,8 +361,8 @@ export default function DashboardClient({ products, user }) {
 
           <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
             {totalCount === 0
-              ? "Paste any product link from Amazon, Walmart, Zara, or other stores to begin automatic price tracking."
-              : "Try switching tabs or adjusting your search query."}
+              ? "Paste any product link from Amazon India, Flipkart, Reliance Digital, or Croma to begin automatic price tracking."
+              : "Try switching status tabs, resetting store filters, or adjusting your search query."}
           </p>
 
           <div className="mt-6 flex justify-center">
