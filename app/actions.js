@@ -1,16 +1,27 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
-import { scrapeProduct } from "@/lib/firecrawl";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { validateProductUrl, validateTargetPrice } from "@/lib/validation";
+import { enqueueProductCheck } from "@/lib/queue/price-check.queue";
 
 export async function addProduct(formData) {
-  const url = formData.get("url");
+  const rawUrl = formData.get("url");
+  const rawTarget = formData.get("target_price");
 
-  if (!url) {
-    return { error: "URL is required" };
+  const urlValidation = validateProductUrl(rawUrl);
+  if (!urlValidation.valid) {
+    return { error: urlValidation.error };
   }
+
+  const targetValidation = validateTargetPrice(rawTarget);
+  if (!targetValidation.valid) {
+    return { error: targetValidation.error };
+  }
+
+  const normalizedUrl = urlValidation.value;
+  const targetPrice = targetValidation.value;
 
   try {
     const supabase = await createClient();
@@ -19,63 +30,75 @@ export async function addProduct(formData) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return { error: "Not authenticated" };
+      return { error: "Not authenticated. Please sign in to track products." };
     }
 
-    // Scrape product data with Firecrawl
-    const productData = await scrapeProduct(url);
-
-    if (!productData.productName || !productData.currentPrice) {
-      console.log(productData, "productData");
-      return { error: "Could not extract product information from this URL" };
-    }
-
-    const newPrice = parseFloat(productData.currentPrice);
-    const currency = productData.currencyCode || "USD";
-
-    // Check if product exists to determine if it's an update
+    // Check if product already exists for this user
     const { data: existingProduct } = await supabase
       .from("products")
-      .select("id, current_price")
+      .select("*")
       .eq("user_id", user.id)
-      .eq("url", url)
-      .single();
+      .eq("url", normalizedUrl)
+      .maybeSingle();
 
-    const isUpdate = !!existingProduct;
+    let product = existingProduct;
+    let isUpdate = !!existingProduct;
 
-    // Upsert product (insert or update based on user_id + url)
-    const { data: product, error } = await supabase
-      .from("products")
-      .upsert(
-        {
+    if (isUpdate) {
+      // If product exists, update target_price if provided, set status to PENDING
+      const updatePayload = {
+        status: "PENDING",
+        error_message: null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (targetPrice !== null) {
+        updatePayload.target_price = targetPrice;
+        updatePayload.last_alerted_price = null; // Re-arm alert
+      }
+
+      const { data: updatedProduct, error: updateError } = await supabase
+        .from("products")
+        .update(updatePayload)
+        .eq("id", existingProduct.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+      product = updatedProduct;
+    } else {
+      // Create new pending product record
+      const { data: newProduct, error: insertError } = await supabase
+        .from("products")
+        .insert({
           user_id: user.id,
-          url,
-          name: productData.productName,
-          current_price: newPrice,
-          currency: currency,
-          image_url: productData.productImageUrl,
+          url: normalizedUrl,
+          name: "Fetching product details...",
+          current_price: 0,
+          currency: "USD",
+          target_price: targetPrice,
+          status: "PENDING",
+          created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: "user_id,url", // Unique constraint on user_id + url
-          ignoreDuplicates: false, // Always update if exists
-        }
-      )
-      .select()
-      .single();
+        })
+        .select()
+        .single();
 
-    if (error) throw error;
+      if (insertError) throw insertError;
+      product = newProduct;
+    }
 
-    // Add to price history if it's a new product OR price changed
-    const shouldAddHistory =
-      !isUpdate || existingProduct.current_price !== newPrice;
-
-    if (shouldAddHistory) {
-      await supabase.from("price_history").insert({
-        product_id: product.id,
-        price: newPrice,
-        currency: currency,
+    // Asynchronously queue background scraping job
+    try {
+      await enqueueProductCheck({
+        productId: product.id,
+        userId: user.id,
+        isInitial: !isUpdate,
+        reason: isUpdate ? "manual_refresh" : "initial_scrape",
       });
+    } catch (queueErr) {
+      console.error("[Queue Error]: Failed to enqueue background job:", queueErr.message);
+      // Even if Redis is temporarily unreachable, product is saved in Postgres
     }
 
     revalidatePath("/");
@@ -83,8 +106,8 @@ export async function addProduct(formData) {
       success: true,
       product,
       message: isUpdate
-        ? "Product updated with latest price!"
-        : "Product added successfully!",
+        ? "Product tracking refreshed! Fetching latest price in the background..."
+        : "Product added! Extracting price and details in the background...",
     };
   } catch (error) {
     console.error("Add product error:", error);
@@ -92,18 +115,115 @@ export async function addProduct(formData) {
   }
 }
 
-export async function deleteProduct(productId) {
+export async function retryProductScrape(productId) {
   try {
     const supabase = await createClient();
-    const { error } = await supabase
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return { error: "Not authenticated" };
+
+    const { data: product, error: fetchError } = await supabase
       .from("products")
-      .delete()
+      .select("*")
+      .eq("id", productId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (fetchError || !product) {
+      return { error: "Product not found or access denied" };
+    }
+
+    await supabase
+      .from("products")
+      .update({
+        status: "PENDING",
+        error_message: null,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", productId);
+
+    await enqueueProductCheck({
+      productId,
+      userId: user.id,
+      isInitial: false,
+      reason: "manual_retry",
+    });
+
+    revalidatePath("/");
+    return { success: true, message: "Price check re-queued!" };
+  } catch (error) {
+    return { error: error.message || "Failed to retry price check" };
+  }
+}
+
+export async function setTargetPrice(productId, rawTargetPrice) {
+  const validation = validateTargetPrice(rawTargetPrice);
+  if (!validation.valid) {
+    return { error: validation.error };
+  }
+
+  const targetPrice = validation.value;
+
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return { error: "Not authenticated" };
+
+    const { data: product, error } = await supabase
+      .from("products")
+      .update({
+        target_price: targetPrice,
+        last_alerted_price: null, // Reset alerted state to arm new target
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", productId)
+      .eq("user_id", user.id)
+      .select()
+      .single();
 
     if (error) throw error;
 
     revalidatePath("/");
-    return { success: true };
+    return {
+      success: true,
+      product,
+      message: targetPrice
+        ? `Target price set to ${product.currency || "USD"} ${targetPrice.toFixed(2)}`
+        : "Target price removed.",
+    };
+  } catch (error) {
+    return { error: error.message || "Failed to update target price" };
+  }
+}
+
+export async function removeTargetPrice(productId) {
+  return await setTargetPrice(productId, null);
+}
+
+export async function deleteProduct(productId) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return { error: "Not authenticated" };
+
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", productId)
+      .eq("user_id", user.id);
+
+    if (error) throw error;
+
+    revalidatePath("/");
+    return { success: true, message: "Product removed from watchlist." };
   } catch (error) {
     return { error: error.message };
   }

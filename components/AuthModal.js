@@ -15,13 +15,15 @@ export default function AuthModal({ isOpen, onClose }) {
 
   const handleGoogleLogin = async () => {
     const baseUrl = (
-      process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      typeof window !== "undefined" && window.location.origin
+        ? window.location.origin
+        : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
     ).replace(/\/$/, "");
 
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${baseUrl}/auth/callback`,
+        redirectTo: `${baseUrl}/auth/callback?next=/dashboard`,
         flowType: "pkce",
       },
     });
@@ -31,9 +33,9 @@ export default function AuthModal({ isOpen, onClose }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Sign in to continue</DialogTitle>
+          <DialogTitle className="text-xl font-semibold">Sign in to PriceRadar</DialogTitle>
           <DialogDescription>
-            Track product prices and get alerts on price drops
+            Monitor product prices continuously, set custom target alert thresholds, and receive instant drop notifications.
           </DialogDescription>
         </DialogHeader>
 
@@ -41,7 +43,7 @@ export default function AuthModal({ isOpen, onClose }) {
           <Button
             onClick={handleGoogleLogin}
             variant="outline"
-            className="w-full gap-2"
+            className="w-full gap-3 h-12 rounded-xl text-sm font-medium border-border/70 hover:bg-accent hover:border-border"
             size="lg"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">

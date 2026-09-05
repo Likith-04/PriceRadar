@@ -1,0 +1,55 @@
+services:
+  # 1. Redis Queue & Cache Backend
+  redis:
+    image: redis:7-alpine
+    container_name: priceradar-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 2. Next.js Web Application
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    container_name: priceradar-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env.local
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # 3. BullMQ Background Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: priceradar-worker
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env.local
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+    driver: local

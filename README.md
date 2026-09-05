@@ -1,235 +1,182 @@
-# PriceRadar - Smart Product Price Tracker
+# PriceRadar - Asynchronous Smart Product Price & Target Alert Tracker
 
+PriceRadar is an asynchronous, high-reliability price tracking system built with **Next.js 16**, **Redis**, **BullMQ**, **Firecrawl AI Extraction**, **Supabase PostgreSQL**, and **Resend**.
 
-Track product prices across e-commerce sites and get alerts on price drops. Built with Next.js, Firecrawl, and Supabase.
+---
 
-## 🎯 Features
+## 🏗️ Architecture Overview
 
-- 🔍 **Track Any Product** - Works with Amazon, Zara, Walmart, and more
-- 📊 **Price History Charts** - Interactive graphs showing price trends over time
-- 🔐 **Google Authentication** - Secure sign-in with Google OAuth
-- 🔄 **Automated Daily Checks** - Scheduled cron jobs check prices automatically
-- 📧 **Email Alerts** - Get notified when prices drop via Resend
+PriceRadar is designed around a decoupled, asynchronous queue architecture:
+
+```
+                BROWSER (User Actions)
+                   │
+                   ▼
+             NEXT.JS APP (Server Actions & API Routes)
+                   │
+      ┌────────────┴─────────────┐
+      │                          │
+      ▼                          ▼
+  Supabase                  Redis / BullMQ
+  PostgreSQL                (Queue: 'price-checks')
+  (Products, History,            │
+   Alerts, Auth RLS)             │
+      │                          │
+      │                     Price Check Jobs
+      │                     { productId, reason }
+      │                          │
+      │                          ▼
+      │                 BACKGROUND WORKER
+      │                 (Concurrency: 5, Rate-Limited)
+      │                          │
+      │                    ┌─────┴────────┐
+      │                    ▼              ▼
+      │               Firecrawl        Resend
+      │               (Scraping)     (Alert Emails)
+      │                    │
+      └────────────────────┘
+                   │
+                   ▼
+          Price History Snapshots
+                   │
+                   ▼
+       Target-Crossing Alert Logic
+```
+
+### Core Architecture Principles
+1. **PostgreSQL is the single source of truth**: Authoritative product, history, and alert states reside in PostgreSQL. Redis and BullMQ serve as execution infrastructure.
+2. **Asynchronous Scraping**: Expensive Firecrawl scraping is decoupled from user-facing requests. When adding a product, the app creates a `PENDING` record and returns in milliseconds while the BullMQ worker executes scraping in the background.
+3. **Non-Blocking Scheduled Monitoring**: The `/api/cron/check-prices` endpoint enqueues batch jobs in BullMQ and finishes in <100ms, eliminating serverless function timeouts.
+4. **Target-Crossing State Machine**: Alerts trigger only when `newPrice <= target_price` on fresh crossings. Duplicate emails are suppressed while price remains at or below target, and automatically re-armed when the price rises back above target.
+5. **Continuous Price Snapshots**: The worker logs periodic snapshots to `price_history` on every scheduled check, allowing Recharts to render smooth historical trends even when prices remain stable.
+6. **URL Normalization**: Strips marketing & tracking parameters (`utm_*`, `ref`, `fbclid`, etc.) and canonicalizes store URLs (e.g. Amazon ASIN paths).
+
+---
 
 ## 🛠️ Tech Stack
 
-- **Next.js 16** - React framework with App Router
-- **Firecrawl** - Web data extraction API
-  - Handles JavaScript rendering
-  - Rotating proxies & anti-bot bypass
-  - Structured data extraction with AI
-  - Works across different e-commerce sites
-- **Supabase** - Backend platform
-  - PostgreSQL Database
-  - Google Authentication
-  - Row Level Security (RLS)
-  - pg_cron for scheduled jobs
-- **Resend** - Transactional emails
-- **shadcn/ui** - UI component library
-- **Recharts** - Interactive charts
-- **Tailwind CSS** - Styling
+- **Next.js 16 (App Router)** - React 19 web frontend and Server Actions
+- **Redis (Upstash / Local Redis)** - Distributed queue storage & rate limiter
+- **BullMQ** - Job queue with exponential backoff, rate limiting, and concurrency control
+- **Firecrawl API** - Anti-bot bypassing, headless JS rendering, and AI structured data extraction
+- **Supabase** - Managed PostgreSQL, Google OAuth Auth (PKCE), and Row Level Security (RLS)
+- **Resend** - Transactional HTML email alerts
+- **Recharts** - Interactive price trend charting with target price reference lines
+- **Tailwind CSS v4 & Lucide React** - UI design with dark/light mode support
+- **Vitest** - Unit and integration testing
+
+---
 
 ## 📋 Prerequisites
 
-Before you begin, ensure you have:
-
-- Node.js 18+ installed
+- **Node.js 18+**
+- A **Redis** instance ([Upstash Redis](https://upstash.com) or local `redis-server`)
 - A [Supabase](https://supabase.com) account
-- A [Firecrawl](https://firecrawl.dev) account
-- A [Resend](https://resend.com) account
-- Google OAuth credentials from [Google Cloud Console](https://console.cloud.google.com/)
+- A [Firecrawl](https://firecrawl.dev) API key
+- A [Resend](https://resend.com) API key
+- Google OAuth credentials configured in Supabase
 
-## 🚀 Setup Instructions
+---
 
-### 1. Clone and Install
+## ⚙️ Environment Variables
 
-```bash
-git clone https://github.com/piyush-eon/smart-product-price-tracker.git
-cd smart-product-price-tracker
-npm install
-```
-
-### 2. Supabase Setup
-
-#### Create Project
-
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Wait for the project to be ready
-
-#### Run Database Migrations
-
-Go to SQL Editor in your Supabase dashboard and run these migrations:
-
-**Migration 1: Database Schema** (`supabase/migrations/001_schema.sql`)
-
-```sql
--- Enable UUID extension
-create extension if not exists "uuid-ossp";
-
--- Products table
-create table products (
-  id uuid primary key default uuid_generate_v4(),
-  user_id uuid references auth.users(id) on delete cascade not null,
-  url text not null,
-  name text not null,
-  current_price numeric(10,2) not null,
-  currency text not null default 'USD',
-  image_url text,
-  created_at timestamp with time zone default now(),
-  updated_at timestamp with time zone default now()
-);
-
--- Price history table
-create table price_history (
-  id uuid primary key default uuid_generate_v4(),
-  product_id uuid references products(id) on delete cascade not null,
-  price numeric(10,2) not null,
-  currency text not null,
-  checked_at timestamp with time zone default now()
-);
-
--- Add unique constraint for upsert functionality
-ALTER TABLE products
-ADD CONSTRAINT products_user_url_unique UNIQUE (user_id, url);
-
--- Enable Row Level Security
-alter table products enable row level security;
-alter table price_history enable row level security;
-
--- Policies for products
-create policy "Users can view their own products"
-  on products for select
-  using (auth.uid() = user_id);
-
-create policy "Users can insert their own products"
-  on products for insert
-  with check (auth.uid() = user_id);
-
-create policy "Users can update their own products"
-  on products for update
-  using (auth.uid() = user_id);
-
-create policy "Users can delete their own products"
-  on products for delete
-  using (auth.uid() = user_id);
-
--- Policies for price_history
-create policy "Users can view price history for their products"
-  on price_history for select
-  using (
-    exists (
-      select 1 from products
-      where products.id = price_history.product_id
-      and products.user_id = auth.uid()
-    )
-  );
-
--- Indexes for performance
-create index products_user_id_idx on products(user_id);
-create index price_history_product_id_idx on price_history(product_id);
-create index price_history_checked_at_idx on price_history(checked_at desc);
-```
-
-**Migration 2: Setup Cron Job** (`supabase/migrations/002_setup_cron.sql`)
-
-```sql
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
-
--- Create function to trigger price check via HTTP
-CREATE OR REPLACE FUNCTION trigger_price_check()
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-BEGIN
-  PERFORM net.http_post(
-    url := 'https://your-app-url.vercel.app/api/cron/check-prices',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer YOUR_CRON_SECRET_HERE'
-    )
-  );
-END;
-$$;
-
--- Schedule cron job to run daily at 9 AM UTC
-SELECT cron.schedule(
-  'daily-price-check',
-  '0 9 * * *',
-  'SELECT trigger_price_check();'
-);
-```
-
-**Note:** Update the URL and Authorization Bearer token in the function after deployment.
-
-#### Enable Google Authentication
-
-1. Go to **Authentication** → **Providers** in Supabase
-2. Enable **Google** provider
-3. Get OAuth credentials from [Google Cloud Console](https://console.cloud.google.com/):
-   - Create a new project or select existing
-   - Enable Google+ API
-   - Create OAuth 2.0 credentials
-   - Add authorized redirect URI: `https://<your-project>.supabase.co/auth/v1/callback`
-4. Copy Client ID and Client Secret to Supabase
-
-#### Get API Credentials
-
-1. Go to **Settings** → **API**
-2. Copy your **Project URL**
-3. Copy your **anon/public** key
-4. Copy your **service_role** key (keep this secret!)
-
-### 3. Firecrawl Setup
-
-1. Sign up at [firecrawl.dev](https://firecrawl.dev)
-2. Go to dashboard and get your API key
-
-### 4. Resend Setup
-
-1. Sign up at [resend.com](https://resend.com)
-2. Get your API key from the dashboard
-3. (Optional) Add and verify your domain for custom email addresses
-
-### 5. Environment Variables
-
-Create `.env.local` in the root directory:
+Create `.env.local` in the project root:
 
 ```env
 # Supabase
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 
-# Firecrawl
-FIRECRAWL_API_KEY=your_firecrawl_api_key
+# Redis (Supports Upstash TLS or local Redis)
+REDIS_URL=redis://127.0.0.1:6379
+# Alternatively:
+# REDIS_HOST=127.0.0.1
+# REDIS_PORT=6379
+# REDIS_PASSWORD=
+# REDIS_TLS=false
 
-# Resend
-RESEND_API_KEY=your_resend_api_key
+# Worker Configuration
+WORKER_CONCURRENCY=5
+FIRECRAWL_RATE_LIMIT_MAX=10
+FIRECRAWL_RATE_LIMIT_DURATION_MS=1000
+
+# Firecrawl API
+FIRECRAWL_API_KEY=fc-your-api-key
+
+# Resend Email
+RESEND_API_KEY=re_your-api-key
 RESEND_FROM_EMAIL=onboarding@resend.dev
 
-# Cron Job Security (generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
-CRON_SECRET=your_generated_cron_secret
+# Cron Authentication
+CRON_SECRET=your-random-32-byte-hex-secret
 
-# App URL
+# Application URL
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-**Generate CRON_SECRET:**
+---
+
+## 🗄️ Database Setup & Migrations
+
+Execute the SQL files located in `supabase/migrations/` inside your Supabase SQL Editor in numerical order:
+
+1. **`001_schema.sql`**: Creates `products` and `price_history` tables with correct RLS policies for `SELECT`, `INSERT`, `UPDATE`, `DELETE`.
+2. **`002_setup_cron.sql`**: Configures `pg_cron` and `pg_net` to call `/api/cron/check-prices`.
+3. **`003_upgrade_v2.sql`**: Adds `target_price`, `status`, `error_message`, `last_alerted_price`, `last_alerted_at` columns and the `price_alerts` audit table.
+
+---
+
+### 🐳 Running with Docker (Recommended)
+
+Run the entire full-stack system (Next.js App + Redis + BullMQ Background Worker) with a single command:
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+docker compose up --build
 ```
 
-### 6. Run Development Server
+To run in detached background mode:
+```bash
+docker compose up -d
+```
 
+To view live logs across all containers:
+```bash
+docker compose logs -f
+```
+
+To stop all containers:
+```bash
+docker compose down
+```
+
+---
+
+### 💻 Running Locally without Docker
+
+#### 1. Install Dependencies
+```bash
+npm install
+```
+
+#### 2. Start Local Redis (if not using Upstash)
+```bash
+redis-server
+```
+
+#### 3. Start Background Worker
+In a dedicated terminal:
+```bash
+npm run worker
+```
+
+#### 4. Start Next.js Web Application
+In another terminal:
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## 📦 Deployment
 
@@ -437,3 +384,44 @@ prompt: "Extract product name, price, currency, image URL, brand, rating, and av
 - Check cron job exists: `SELECT * FROM cron.job;`
 - Verify the function URL and Authorization header are correct
 - Check Supabase logs for errors
+
+---
+
+## 🧪 Testing
+
+Run the automated test suite with Vitest:
+
+```bash
+npm run test
+```
+
+Tests cover:
+- Target price validation (positive numbers, precision, null handling, boundaries)
+- URL normalization & tracking parameter removal (Amazon ASIN paths, Walmart, general tracking query stripping)
+- Target-crossing alert state machine (initial crossings, duplicate suppression, re-arming on price rises)
+- Redis and BullMQ connection options
+- Worker snapshot and deletion safety workflows
+- Cron authorization verification
+
+---
+
+## 📦 Production Deployment
+
+### 1. Web Application (Vercel)
+- Connect repository to Vercel.
+- Configure all environment variables in Vercel project settings.
+- Ensure `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `REDIS_URL`, `FIRECRAWL_API_KEY`, and `RESEND_API_KEY` are provided.
+
+### 2. Background Worker (Railway / Render / Fly.io / VPS)
+Because Next.js serverless functions are ephemeral and terminate after HTTP responses, the BullMQ worker runs as a dedicated long-running process:
+- **Build command**: `npm install`
+- **Start command**: `npm run worker`
+- **Environment variables**: Same as web application.
+
+### 3. Automated Cron Trigger
+- Set up Supabase `pg_cron` (via `supabase/migrations/002_setup_cron.sql`) or use an external scheduler (GitHub Actions / Upstash QStash / Cron-Job.org) to trigger `POST /api/cron/check-prices` with `Authorization: Bearer <CRON_SECRET>`.
+
+---
+
+## 📄 License
+MIT License

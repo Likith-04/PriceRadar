@@ -1,26 +1,58 @@
-import { createClient } from "@/utils/supabase/server";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 export async function GET(request) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
-  const errorMessage = searchParams.get("error_description") ?? searchParams.get("error");
+  const next = searchParams.get("next") ?? "/dashboard";
+  const errorMessage =
+    searchParams.get("error_description") ?? searchParams.get("error");
 
   if (code) {
-    const supabase = await createClient();
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              );
+            } catch {
+              // Ignore errors when called in server contexts
+            }
+          },
+        },
+      }
+    );
+
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      return NextResponse.redirect(new URL(next, request.url));
+      const forwardedHost = request.headers.get("x-forwarded-host");
+      const isLocalEnv = process.env.NODE_ENV === "development";
+
+      if (isLocalEnv) {
+        return NextResponse.redirect(`${origin}${next}`);
+      } else if (forwardedHost) {
+        return NextResponse.redirect(`https://${forwardedHost}${next}`);
+      } else {
+        return NextResponse.redirect(`${origin}${next}`);
+      }
     }
 
-    console.error("OAuth exchange failed:", error);
+    console.error("[OAuth Callback Error]:", error.message);
   }
 
   const errorPath = errorMessage
     ? `/error?error=${encodeURIComponent(errorMessage)}`
     : "/error";
 
-  return NextResponse.redirect(new URL(errorPath, request.url));
+  return NextResponse.redirect(`${origin}${errorPath}`);
 }

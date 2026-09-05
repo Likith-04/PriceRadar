@@ -1,23 +1,33 @@
 "use client";
 
-import { useState } from "react";
-import { signOut } from "@/app/actions";
+import { useState, useEffect } from "react";
+import { createClient } from "@/utils/supabase/client";
+import UserProfileMenu from "./UserProfileMenu";
 import AuthModal from "./AuthModal";
 import { Button } from "@/components/ui/button";
-import { LogIn, LogOut } from "lucide-react";
+import { LogIn } from "lucide-react";
 
-export default function AuthButton({ user }) {
+export default function AuthButton({ user: initialUser }) {
+  const [user, setUser] = useState(initialUser);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const supabase = createClient();
+
+  useEffect(() => {
+    setUser(initialUser);
+  }, [initialUser]);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
 
   if (user) {
-    return (
-      <form action={signOut}>
-        <Button variant="ghost" size="sm" type="submit" className="gap-2">
-          <LogOut className="w-4 h-4" />
-          Sign Out
-        </Button>
-      </form>
-    );
+    return <UserProfileMenu initialUser={user} />;
   }
 
   return (
@@ -26,7 +36,7 @@ export default function AuthButton({ user }) {
         onClick={() => setShowAuthModal(true)}
         variant="default"
         size="sm"
-        className="gap-2 shadow-sm"
+        className="gap-2 shadow-sm rounded-xl font-medium"
       >
         <LogIn className="w-4 h-4" />
         Sign In
